@@ -1,0 +1,17 @@
+{
+  "accountAssociation": {
+    "header": "REPLACE_BASE64_HEADER",
+    "payload": "REPLACE_BASE64_PAYLOAD",
+    "signature": "REPLACE_BASE64_SIGNATURE"
+  },
+  "miniapp": {
+    "version": "1",
+    "name": "2048",
+    "iconUrl": "https://web-production-24357.up.railway.app/icon.png",
+    "homeUrl": "https://web-production-24357.up.railway.app",
+    "imageUrl": "https://web-production-24357.up.railway.app/og.png",
+    "buttonTitle": "Play",
+    "splashImageUrl": "https://web-production-24357.up.railway.app/splash.png",
+    "splashBackgroundColor": "#faf8ef"
+  }
+}

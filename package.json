@@ -7,7 +7,12 @@
     "dev": "pnpm -r --parallel run dev",
     "build": "pnpm -r run build",
     "dev:api": "pnpm --filter @app/api dev",
-    "dev:web": "pnpm --filter @app/web dev"
+    "dev:web": "pnpm --filter @app/web dev",
+    "build:api": "pnpm --filter @app/api build",
+    "build:web": "pnpm --filter @app/web build",
+    "start:api": "pnpm --filter @app/api start",
+    "start:web": "pnpm --filter @app/web start",
+    "db:migrate": "pnpm --filter @app/api db:migrate"
   },
   "engines": {
     "node": ">=20"
