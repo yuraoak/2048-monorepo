@@ -7,11 +7,11 @@
   "miniapp": {
     "version": "1",
     "name": "2048",
-    "iconUrl": "https://web-production-24357.up.railway.app/icon.png",
-    "homeUrl": "https://web-production-24357.up.railway.app",
-    "imageUrl": "https://web-production-24357.up.railway.app/og.png",
+    "iconUrl": "__PUBLIC_URL__/icon.png",
+    "homeUrl": "__PUBLIC_URL__",
+    "imageUrl": "__PUBLIC_URL__/og.png",
     "buttonTitle": "Play",
-    "splashImageUrl": "https://web-production-24357.up.railway.app/splash.png",
+    "splashImageUrl": "__PUBLIC_URL__/splash.png",
     "splashBackgroundColor": "#faf8ef"
   }
 }

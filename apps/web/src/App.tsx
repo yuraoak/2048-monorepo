@@ -447,7 +447,7 @@ function Game({ auth }: { auth: AuthState }) {
   const undoLabel = (() => {
     if (undoStatus === "paying") return "Confirm in wallet…";
     if (undoStatus === "confirming") return "Confirming…";
-    return "Undo · 0.0005 Ξ";
+    return "Undo · $1";
   })();
 
   return (
@@ -481,7 +481,7 @@ function Game({ auth }: { auth: AuthState }) {
           className="btn ghost"
           onClick={triggerUndo}
           disabled={undoDisabled}
-          title="Costs 0.0005 ETH on Base. Removes your last move."
+          title="Costs $1 in ETH on Base. Removes your last move."
         >
           {undoLabel}
         </button>
