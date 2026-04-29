@@ -1,65 +1,100 @@
 # 2048 Monorepo
 
-pnpm-монорепа: React/Vite клиент + Hono API + Postgres + Redis (опционально). Хостинг — Railway / Lizard.
+pnpm-монорепа: Vite/React клиент (Farcaster Mini App) + Hono API + Postgres + Redis. Хостинг — Railway.
 
 ## Структура
-- `apps/web` — Vite + React, игра 2048
-- `apps/api` — Hono на Node, эндпоинты лидерборда и сохранения игр
-- Postgres хранит таблицы `scores` и `games`
-- Redis (опционально) кэширует ответы лидерборда
+- `apps/web` — Vite + React, игра 2048 в виде Farcaster Mini App
+- `apps/api` — Hono на Node, ручки auth/game/leaderboard и проверка on-chain платежей за undo (viem, Base)
+- Postgres хранит `scores` (лидерборд) и `undo_payments` (использованные tx-хэши)
+- Redis хранит активные партии (`game:active:{fid}`), кэш лидерборда и rate-limit счётчики
 
 ## Локальный запуск
 ```bash
 pnpm install
-# поднять Postgres локально (например docker run -e POSTGRES_PASSWORD=pg -p 5432:5432 -d postgres:16)
-# опционально поднять Redis: docker run -p 6379:6379 -d redis:7
+# Postgres: docker run -e POSTGRES_PASSWORD=pg -p 5432:5432 -d postgres:16
+# Redis:    docker run -p 6379:6379 -d redis:7
 cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env
-pnpm --filter @app/api db:migrate
+pnpm db:migrate
 pnpm dev
 ```
 
+Web по умолчанию на `:5173`, API на `:8080`. Игра работает только внутри Farcaster — снаружи показывается fallback-страница.
+
+## Переменные окружения
+
+**API (`apps/api/.env`):**
+- `DATABASE_URL` — Postgres
+- `REDIS_URL` — Redis. Обязателен для game state и undo; кэш лидерборда без него молча отключается.
+- `PORT` (по умолчанию 8080), `CORS_ORIGIN`
+- `MINIAPP_DOMAIN` — хост фронта (без схемы). Quick Auth выпускает JWT, привязанные к этому домену; API сверяет `aud`.
+- `TREASURY_ADDRESS` — адрес на Base, куда уходят платежи за undo
+- `BASE_RPC_URL` (по умолчанию `https://mainnet.base.org`), `UNDO_PRICE_WEI` (по умолчанию 0.0005 ETH), `UNDO_MIN_CONFIRMATIONS`
+
+**Web (`apps/web/.env`):**
+- `VITE_API_URL` — base URL API
+
+## Архитектура: server-authoritative game state
+
+Игра целиком авторитативна на сервере. Клиент локально только рендерит и накапливает анимации; источник истины — пара `(seed, move_log)` в Redis.
+
+- `POST /api/games/start` (auth) — стартует партию, сервер генерит `seed`, кладёт в Redis.
+- `POST /api/games/state` (auth) — текущее состояние (для resume).
+- `POST /api/games/move` (auth) — `{ dirs: "udlr…", expectedLen }`. Сервер прогоняет batch ходов на своей доске, отбрасывает no-op, обновляет `move_log` атомарно через Lua-скрипт CAS (`gameStore.ts:APPEND_SCRIPT`). `expectedLen` защищает от гонок: если длина лога на сервере уехала — `409` и клиент делает resync.
+- `POST /api/scores/submit` (auth) — ничего не принимает, кроме опциональных `username`/`pfp_url`. Сервер сам проверяет `over=true` по своему состоянию, считает финальный score через `replay()` и пишет в `scores` через `INSERT … ON CONFLICT (fid) DO UPDATE WHERE EXCLUDED.score > scores.score`.
+
+Подделать score невозможно: клиент не отправляет ни score, ни доску.
+
+Replay (`apps/api/src/replay.ts`) — детерминированный: Mulberry32 PRNG + ровно та же merge-логика, что на клиенте (`apps/web/src/game.ts`).
+
+## Auth: Farcaster Quick Auth
+
+Клиент использует `@farcaster/miniapp-sdk` (`sdk.quickAuth.fetch`), который автоматически прикладывает Bearer JWT к каждому запросу. Сервер (`apps/api/src/auth.ts`) валидирует токен через `@farcaster/quick-auth`, сверяя `aud` с `MINIAPP_DOMAIN`, и кладёт `fid` в контекст хендлера.
+
+## Undo через on-chain платёж (Base)
+
+Откатить последний ход стоит 0.0005 ETH на Base. Поток intent-based:
+
+1. `POST /api/games/undo/intent` — сервер инкрементит nonce в Redis (`undo:intent:counter`), сохраняет `{ fid }` под `undo:intent:{nonce}` (TTL 10 мин), возвращает `amount_wei = base_price + nonce` и адрес treasury.
+2. Клиент (`apps/web/src/wallet.ts`) шлёт ровно `amount_wei` на treasury через Farcaster embedded wallet.
+3. `POST /api/games/undo` с `txHash` — сервер через viem проверяет: tx подтверждена, статус success, recipient = treasury, value ≥ base_price, нужное количество подтверждений. Из `value - base_price` восстанавливает nonce, по nonce — fid; сверяет с авторизованным.
+4. Tx-хэш клеймится в `undo_payments` (PK = tx_hash → защита от повторного использования). Только после этого Lua-скрипт `POP_SCRIPT` атомарно срезает последний символ `move_log`. Если pop падает — строка `undo_payments` откатывается, чтобы tx можно было переотправить.
+
+Почему intent через `value`, а не calldata: embedded-кошелёк Farcaster переписывает/дропает calldata на простых ETH-переводах. Уникальный `value` — единственный надёжный канал привязки fid к платежу.
+
 ## Кэш лидерборда (Redis)
 
-`GET /api/scores` использует cache-aside поверх Redis. Если `REDIS_URL` не задан, кэш молча отключается и API работает напрямую с Postgres — это удобно для локальной разработки без Redis.
+`GET /api/scores` — cache-aside поверх Redis.
+- Ключ: `scores:top:{limit}:{offset}` — отдельная запись на каждую страницу.
+- TTL: 15 секунд (`SCORES_CACHE_TTL` в `apps/api/src/index.ts`).
+- Инвалидация: `POST /api/scores/submit` после успешного апдейта делает `SCAN` + `DEL` по паттерну `scores:top:*` (`cacheInvalidatePattern`).
+- Диагностика: заголовок `X-Cache: HIT|MISS`.
 
-- **Ключ:** `scores:top:{limit}:{offset}` — отдельная запись на каждую страницу.
-- **TTL:** 15 секунд (`SCORES_CACHE_TTL` в `apps/api/src/index.ts`).
-- **Инвалидация:** `POST /api/scores` после успешного апдейта вызывает `SCAN` + `DEL` по паттерну `scores:top:*`. То есть свежий рекорд виден сразу, а не через TTL.
-- **Диагностика:** ответ помечается заголовком `X-Cache: HIT|MISS`.
-
-Проверить локально:
-```bash
-curl -i http://localhost:8080/api/scores | grep -i x-cache  # MISS
-curl -i http://localhost:8080/api/scores | grep -i x-cache  # HIT
-```
-
-Клиент Redis — `ioredis`, инициализация в `apps/api/src/cache.ts`. Все ошибки кэша логируются и не пробрасываются наружу: если Redis упал, API продолжит отдавать данные из Postgres.
-
-## Anti-cheat: серверный replay
-
-`POST /api/scores` **не принимает скор от клиента**. Вместо `{ score, max_tile, moves }` клиент отправляет `{ seed, moves }`, где:
-
-- `seed` — uint32, выбирается клиентом в начале партии и используется как сид PRNG;
-- `moves` — компактная строка ходов вида `"udlrur..."` (`u/d/l/r` ↔ up/down/left/right), потолок 100 000 символов.
-
-Сервер прогоняет ту же 2048-логику с тем же сидом (Mulberry32 PRNG, идентичная реализация в `apps/api/src/replay.ts` и `apps/web/src/game.ts`), вычисляет авторитативные `score`/`max_tile`/`moves` и пишет в БД именно их. Подделать невозможно: чтобы получить score N, нужно прислать реальную последовательность ходов, дающую N после replay'а.
-
-**Ограничения, о которых стоит помнить:**
-- `username` и `pfp_url` всё ещё приходят от клиента. Уникальность в БД по `fid`, но отображаемое имя можно подменить. Чинится тягой имени из Farcaster API на сервере.
-- На клиенте `seed` и move log хранятся в `localStorage` (`2048.seed`, `2048.moves`). Если очистить хранилище или зайти с другого устройства — partition без replay'а, submit на лидерборд недоступен до начала новой партии. Серверный snapshot в `games` остаётся для удобного resume, но без submit.
+Все ошибки кэша логируются и не пробрасываются — если Redis упадёт, лидерборд продолжит отдаваться напрямую из Postgres.
 
 ## Rate limiting
 
-`POST /api/scores` ограничен **5 submissions в минуту на fid** через Redis (`INCR` + `EXPIRE` на ключе `ratelimit:scores:{fid}`). Превышение — `429`. Если Redis недоступен, лимит fail-open (пропускает) — анти-чит держится не на rate limit'е, а на replay'е.
+Через Redis `INCR + EXPIRE` (`cache.ts:rateLimit`), на ключ `ratelimit:{op}:{fid}`:
 
-## Деплой на Railway / Lizard
+| Операция                | Лимит        | Окно |
+|-------------------------|--------------|------|
+| `POST /games/move`      | 240 запросов | 60s  |
+| `POST /scores/submit`   | 5 запросов   | 60s  |
+| `POST /games/undo`      | 10 запросов  | 60s  |
+| `POST /games/undo/intent` | 10 запросов | 60s  |
+
+Превышение — `429`. Если Redis недоступен, лимит fail-open: анти-чит держится не на лимите, а на серверном replay'е.
+
+## Деплой на Railway
+
 Четыре сервиса в одном проекте:
-- `db` — Postgres
-- `cache` — Redis (опционально, но рекомендуется)
+- `Postgres` (managed)
+- `Redis` (managed)
 - `api` — Hono
-- `web` — статика Vite
+- `web` — статика Vite (через `serve`)
 
-На Railway: жмёшь "Add Service → Database → Redis", он автоматически прокидывает `REDIS_URL` в переменные проекта. Привязываешь её в сервисе `api` через reference (`${{Redis.REDIS_URL}}`). На Lizard аналогично — поднимаешь Redis-сервис рядом и указываешь его URL в env у `api`.
+Скрипты в корневом `package.json` готовы под Railway:
+- `pnpm build:api` / `pnpm start:api` / `pnpm db:migrate`
+- `pnpm build:web` / `pnpm start:web`
 
-Если `REDIS_URL` не указан — деплой всё равно поднимется, просто без кэша.
+API ставится перед web, потому что `VITE_API_URL` зашивается в бандл на этапе билда — домен api должен существовать к моменту сборки фронта. CORS_ORIGIN/MINIAPP_DOMAIN для api — runtime, их можно дотянуть после деплоя web без пересборки.
