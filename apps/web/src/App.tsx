@@ -12,18 +12,23 @@ import {
   type Tile,
 } from "./game";
 import {
+  buyPack,
+  createShare,
   fetchGameState,
+  fetchMe,
   fetchMyScore,
+  fetchPackIntent,
   fetchScores,
-  fetchUndoIntent,
   postMove,
   postUndo,
+  previewShare,
   startGame,
   submitScore,
   type GameState,
+  type Pack,
   type ScoreRow,
 } from "./api";
-import { payForUndo } from "./wallet";
+import { payTreasury } from "./wallet";
 
 const PAGE_SIZE = 20;
 
@@ -155,6 +160,10 @@ function Game({ auth }: { auth: AuthState }) {
   const [hydrated, setHydrated] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [gameOverModal, setGameOverModal] = useState<null | {
+    score: number;
+    newBest: boolean;
+  }>(null);
 
   const seedRef = useRef<number>(0);
   const moveLogRef = useRef<string>("");
@@ -170,6 +179,8 @@ function Game({ auth }: { auth: AuthState }) {
 
   const [undoStatus, setUndoStatus] = useState<"idle" | "paying" | "confirming">("idle");
   const [undoError, setUndoError] = useState<string | null>(null);
+  const [undoCredits, setUndoCredits] = useState<number>(0);
+  const [showShop, setShowShop] = useState(false);
 
   // Re-derive Tile[] (with stable ids and isNew/merged flags) by replaying
   // the server-provided move log against a fresh local rng. This keeps tile
@@ -248,6 +259,22 @@ function Game({ auth }: { auth: AuthState }) {
   }, [auth.fetcher]);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const me = await fetchMe(auth.fetcher);
+        if (cancelled) return;
+        setUndoCredits(me.undo_credits);
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [auth.fetcher]);
+
+  useEffect(() => {
     if (score > best) setBest(score);
   }, [score, best]);
 
@@ -264,10 +291,17 @@ function Game({ auth }: { auth: AuthState }) {
       { username: auth.user.username, pfp_url: auth.user.pfpUrl },
       auth.fetcher
     )
-      .then((row) => {
+      .then((res) => {
         submittedRef.current = true;
         setSubmitted(true);
-        setBest((b) => Math.max(b, row.score));
+        setBest((b) => Math.max(b, res.score.score));
+        // Pop the share modal as soon as the server-authoritative submit lands
+        // — that's the moment we know the rank is meaningful (it would still
+        // be stale if we opened on the optimistic `over` flag).
+        setGameOverModal({
+          score: res.last_game.score,
+          newBest: res.new_best,
+        });
       })
       .catch(() => {
         // user can retry via new game
@@ -359,6 +393,7 @@ function Game({ auth }: { auth: AuthState }) {
     setSubmitted(false);
     setUndoError(null);
     setUndoStatus("idle");
+    setGameOverModal(null);
     try {
       const s = await startGame(auth.fetcher);
       syncFromServer(s);
@@ -369,33 +404,59 @@ function Game({ auth }: { auth: AuthState }) {
 
   const triggerUndo = useCallback(async () => {
     if (undoStatus !== "idle") return;
+    if (undoCredits <= 0) {
+      // No credits → "Purchase Undo" route. Always available, even with no
+      // moves yet or game over, so users can stock up at any time.
+      setShowShop(true);
+      return;
+    }
     if (overRef.current) return;
     if (moveLogRef.current.length === 0) return;
     setUndoError(null);
-    setUndoStatus("paying");
+    setUndoStatus("confirming");
     undoActiveRef.current = true;
     try {
-      // Server hands out a per-intent unique amount; the nonce embedded in
-      // the value is what binds this on-chain payment to our fid.
-      const intent = await fetchUndoIntent(auth.fetcher);
-      const txHash = await payForUndo({
-        treasury: intent.treasury,
-        amountWei: intent.amount_wei,
-      });
-      setUndoStatus("confirming");
-      const s = await postUndo(txHash, auth.fetcher);
-      queueRef.current = [];
-      syncFromServer(s);
-    } catch (err: unknown) {
-      const e = err as { message?: string; code?: number };
-      if (e.code !== 4001) {
-        setUndoError(e.message ?? "undo failed");
+      const res = await postUndo(auth.fetcher);
+      if (!res.ok) {
+        if (res.status === 402) {
+          // Credit balance fell out from under us — refresh and open shop.
+          setUndoCredits(res.undo_credits ?? 0);
+          setShowShop(true);
+          return;
+        }
+        throw new Error(res.error);
       }
+      queueRef.current = [];
+      syncFromServer(res.state);
+      setUndoCredits(res.undo_credits);
+    } catch (err: unknown) {
+      const e = err as { message?: string };
+      setUndoError(e.message ?? "undo failed");
     } finally {
       undoActiveRef.current = false;
       setUndoStatus("idle");
     }
-  }, [auth.fetcher, undoStatus, syncFromServer]);
+  }, [auth.fetcher, undoStatus, undoCredits, syncFromServer]);
+
+  const buyAndCredit = useCallback(
+    async (packId: Pack["id"]) => {
+      try {
+        const intent = await fetchPackIntent(packId, auth.fetcher);
+        const txHash = await payTreasury({
+          treasury: intent.treasury,
+          amountWei: intent.amount_wei,
+        });
+        const res = await buyPack(txHash, packId, auth.fetcher);
+        setUndoCredits(res.undo_credits);
+        setShowShop(false);
+      } catch (err: unknown) {
+        const e = err as { message?: string; code?: number };
+        if (e.code === 4001) return; // user rejected
+        setUndoError(e.message ?? "purchase failed");
+      }
+    },
+    [auth.fetcher]
+  );
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -442,12 +503,19 @@ function Game({ auth }: { auth: AuthState }) {
   const displayName = auth.user.username ?? `fid:${auth.user.fid}`;
   const maxTile = maxTileValue(tiles);
 
+  const noCredits = undoCredits <= 0;
+  // When the user has no credits the button is always active (it opens the
+  // shop). With credits, normal undo gating applies — must have made moves
+  // and not be in game-over/finished/loading state.
   const undoDisabled =
-    !hydrated || over || finished || moves === 0 || undoStatus !== "idle";
+    !hydrated ||
+    finished ||
+    undoStatus !== "idle" ||
+    (!noCredits && (over || moves === 0));
   const undoLabel = (() => {
-    if (undoStatus === "paying") return "Confirm in wallet…";
-    if (undoStatus === "confirming") return "Confirming…";
-    return "Undo · $1";
+    if (undoStatus === "confirming") return "Undoing…";
+    if (noCredits) return "Purchase Undo";
+    return `Undo · ${undoCredits} left`;
   })();
 
   return (
@@ -481,7 +549,11 @@ function Game({ auth }: { auth: AuthState }) {
           className="btn ghost"
           onClick={triggerUndo}
           disabled={undoDisabled}
-          title="Costs $1 in ETH on Base. Removes your last move."
+          title={
+            noCredits
+              ? "No undo credits — tap to buy a pack."
+              : "Removes your last move."
+          }
         >
           {undoLabel}
         </button>
@@ -515,6 +587,244 @@ function Game({ auth }: { auth: AuthState }) {
       {showLeaderboard && (
         <LeaderboardModal currentFid={auth.user.fid} onClose={() => setShowLeaderboard(false)} />
       )}
+
+      {gameOverModal && (
+        <GameOverModal
+          fetcher={auth.fetcher}
+          score={gameOverModal.score}
+          newBest={gameOverModal.newBest}
+          onClose={() => setGameOverModal(null)}
+          onPlayAgain={() => {
+            setGameOverModal(null);
+            void startFresh();
+          }}
+        />
+      )}
+
+      {showShop && (
+        <ShopModal
+          credits={undoCredits}
+          onBuy={buyAndCredit}
+          onClose={() => setShowShop(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Anchor pricing — best-value pack at the top so the value-driving option is
+// the first thing the eye lands on. Per-undo price + savings on larger packs
+// turns abstract dollar amounts into concrete value framing.
+type ShopPack = {
+  id: Pack["id"];
+  undos: number;
+  ethDisplay: string;
+  usd: number;
+  perUndo: string;
+  flag?: string;
+  variant: "best" | "popular" | "starter";
+};
+
+const SHOP_PACKS: ShopPack[] = [
+  { id: "large",  undos: 100, ethDisplay: "0.0043", usd: 10, perUndo: "$0.10/undo", flag: "Best value", variant: "best" },
+  { id: "medium", undos: 15,  ethDisplay: "0.0013", usd: 3,  perUndo: "$0.20/undo", flag: "Popular",    variant: "popular" },
+  { id: "small",  undos: 3,   ethDisplay: "0.0004", usd: 1,  perUndo: "",                                variant: "starter" },
+];
+
+type ShopModalProps = {
+  credits: number;
+  onBuy: (pack: Pack["id"]) => Promise<void> | void;
+  onClose: () => void;
+};
+
+function ShopModal({ credits, onBuy, onClose }: ShopModalProps) {
+  const [busy, setBusy] = useState<Pack["id"] | null>(null);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const click = async (pack: Pack["id"]) => {
+    if (busy) return;
+    setBusy(pack);
+    try {
+      await onBuy(pack);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div
+      className="shop-backdrop"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="shop-title"
+    >
+      <section className="shop" onClick={(e) => e.stopPropagation()}>
+        <header className="shop-head">
+          <div>
+            <p className="shop-eyebrow">Refill</p>
+            <h2 className="shop-title" id="shop-title">Pick a pack</h2>
+            <p className="shop-sub">
+              You have <b>{credits}</b> undo{credits === 1 ? "" : "s"} left — credits never expire.
+            </p>
+          </div>
+          <button className="shop-close" onClick={onClose} aria-label="Close" type="button">
+            ×
+          </button>
+        </header>
+
+        <div className="packs">
+          {SHOP_PACKS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={`pack pack--${p.variant}${busy === p.id ? " pack--busy" : ""}`}
+              onClick={() => void click(p.id)}
+              disabled={busy !== null}
+            >
+              {p.flag && <span className="pack-flag">{p.flag}</span>}
+              <span className="pack-amount">
+                <span className="pack-num">{p.undos}</span>
+                <span className="pack-unit">undos</span>
+              </span>
+              <span className="pack-gap" />
+              <span className="pack-price">
+                <span className="pack-eth">
+                  {p.ethDisplay}
+                  <span className="ksi"> Ξ</span>
+                </span>
+                <span className="pack-meta">
+                  ≈ ${p.usd}
+                  {p.perUndo && ` · ${p.perUndo}`}
+                </span>
+              </span>
+              {busy === p.id && <span className="pack-overlay">Confirm in wallet…</span>}
+            </button>
+          ))}
+        </div>
+
+        <p className="shop-foot">
+          <span>Paid in ETH on Base</span>
+          <span className="dot" aria-hidden="true" />
+          <span>Auto-refills your balance</span>
+        </p>
+      </section>
+    </div>
+  );
+}
+
+type GameOverModalProps = {
+  fetcher: typeof fetch;
+  score: number;
+  newBest: boolean;
+  onClose: () => void;
+  onPlayAgain: () => void;
+};
+
+function GameOverModal({
+  fetcher,
+  score,
+  newBest,
+  onClose,
+  onPlayAgain,
+}: GameOverModalProps) {
+  const [phase, setPhase] = useState<"idle" | "preparing" | "composing">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [rank, setRank] = useState<number | null>(null);
+  // Strict mode in dev fires effects twice — without this we'd burn two
+  // preview renders and eat into our share rate limit on first render.
+  const startedRef = useRef(false);
+
+  useEffect(() => {
+    if (startedRef.current) return;
+    startedRef.current = true;
+    setPhase("preparing");
+    setError(null);
+    previewShare(fetcher)
+      .then((res) => {
+        setPreview(res.image_data_url);
+        setRank(res.rank);
+      })
+      .catch((err) => {
+        setError(String(err?.message ?? err));
+      })
+      .finally(() => setPhase("idle"));
+  }, [fetcher]);
+
+  const onShare = useCallback(async () => {
+    setError(null);
+    setPhase("composing");
+    try {
+      // Persist the share image to S3 only now that the user has committed
+      // to sharing. Costs an extra render server-side, but keeps the bucket
+      // free of images for closed-modal sessions.
+      const created = await createShare(fetcher);
+      const scoreText = score.toLocaleString("en-US");
+      const rankText = rank ? ` (#${rank})` : "";
+      const text = newBest
+        ? `new 2048 PB — ${scoreText}${rankText}. think you can beat that?`
+        : `${scoreText} on 2048${rankText}. who's coming for me`;
+      await sdk.actions.composeCast({
+        text,
+        embeds: [created.share_url],
+      });
+    } catch (err) {
+      setError(String((err as { message?: string })?.message ?? err));
+    } finally {
+      setPhase("idle");
+    }
+  }, [fetcher, newBest, score, rank]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal gameover-modal" onClick={(e) => e.stopPropagation()}>
+        <header className="modal-head">
+          <h2>{newBest ? "New best!" : "Game over"}</h2>
+          <button className="modal-close" onClick={onClose} aria-label="Close">
+            ×
+          </button>
+        </header>
+        <div className="modal-body">
+          <div className="gameover-preview">
+            {phase === "preparing" && !preview && (
+              <div className="muted">Generating share image…</div>
+            )}
+            {preview && (
+              <img src={preview} alt="2048 share card" className="gameover-preview-img" />
+            )}
+            {error && <div className="muted error">{error}</div>}
+          </div>
+
+          <div className="gameover-actions">
+            <button className="btn ghost" onClick={onPlayAgain}>
+              Play again
+            </button>
+            <button
+              className="btn"
+              onClick={onShare}
+              disabled={phase !== "idle" || !preview}
+            >
+              {phase === "composing" ? "Opening…" : "Share to Farcaster"}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

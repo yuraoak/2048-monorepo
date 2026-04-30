@@ -36,7 +36,7 @@ async function ensureBaseChain(provider: Eip1193Provider) {
   }
 }
 
-export type UndoPaymentArgs = {
+export type TreasuryPaymentArgs = {
   treasury: string;
   amountWei: string;
 };
@@ -44,9 +44,9 @@ export type UndoPaymentArgs = {
 // Simple ETH transfer to the treasury for the exact intent-bound amount. No
 // calldata: smart-wallet implementations (Farcaster's embedded wallet
 // included) sometimes drop or rewrite `data` on plain transfers, which would
-// silently zero out the value. We bind the payment to the user's fid via the
-// unique amount_wei issued by /api/games/undo/intent.
-export async function payForUndo({ treasury, amountWei }: UndoPaymentArgs): Promise<string> {
+// silently zero out the value. The payment is bound to the user's fid (and
+// the chosen pack) via the unique amount_wei the server issues per intent.
+export async function payTreasury({ treasury, amountWei }: TreasuryPaymentArgs): Promise<string> {
   const provider = await getProvider();
   await ensureBaseChain(provider);
 

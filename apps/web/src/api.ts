@@ -26,10 +26,16 @@ export type GameState = {
 // shrink hot-path payloads. Client only needs log_len for sync detection.
 export type GameStateLite = Omit<GameState, "move_log">;
 
+export type Pack = {
+  id: "small" | "medium" | "large";
+  undos: number;
+  price_wei: string;
+};
+
 export type Config = {
   treasury: string;
-  undo_price_wei: string;
   chain_id: number;
+  packs: Pack[];
 };
 
 type FetchFn = typeof fetch;
@@ -107,38 +113,119 @@ export async function postMove(
   return { ok: false, status: res.status, error: data.error ?? `${res.status}`, state: data.state ?? null };
 }
 
-export type UndoIntent = {
+export type Me = { fid: number; undo_credits: number };
+
+export async function fetchMe(fetcher: FetchFn): Promise<Me> {
+  return await request<Me>(`/api/me`, {}, fetcher);
+}
+
+export type PackIntent = {
   nonce: number;
+  pack: Pack["id"];
+  undos: number;
   amount_wei: string;
   treasury: string;
   expires_in_sec: number;
 };
 
-export async function fetchUndoIntent(fetcher: FetchFn): Promise<UndoIntent> {
-  return await request<UndoIntent>(
-    `/api/games/undo/intent`,
+export async function fetchPackIntent(
+  pack: Pack["id"],
+  fetcher: FetchFn
+): Promise<PackIntent> {
+  return await request<PackIntent>(
+    `/api/shop/packs/intent`,
+    { method: "POST", body: JSON.stringify({ pack }) },
+    fetcher
+  );
+}
+
+export type BuyPackResult = { undo_credits: number; undos_credited: number };
+
+export async function buyPack(
+  txHash: string,
+  pack: Pack["id"],
+  fetcher: FetchFn
+): Promise<BuyPackResult> {
+  return await request<BuyPackResult>(
+    `/api/shop/packs/buy`,
+    { method: "POST", body: JSON.stringify({ txHash, pack }) },
+    fetcher
+  );
+}
+
+export type UndoResult =
+  | { ok: true; state: GameState; undo_credits: number }
+  | { ok: false; status: number; error: string; undo_credits?: number };
+
+export async function postUndo(fetcher: FetchFn): Promise<UndoResult> {
+  const res = await fetcher(`${API_URL}/api/games/undo`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    state?: GameState;
+    error?: string;
+    undo_credits?: number;
+  };
+  if (res.ok && data.state) {
+    return { ok: true, state: data.state, undo_credits: data.undo_credits ?? 0 };
+  }
+  return {
+    ok: false,
+    status: res.status,
+    error: data.error ?? `${res.status}`,
+    undo_credits: data.undo_credits,
+  };
+}
+
+export type SubmitScoreResult = {
+  score: ScoreRow;
+  last_game: { score: number; max_tile: number };
+  new_best: boolean;
+};
+
+export async function submitScore(
+  payload: { username?: string; pfp_url?: string },
+  fetcher: FetchFn
+): Promise<SubmitScoreResult> {
+  return await request<SubmitScoreResult>(
+    `/api/scores/submit`,
+    { method: "POST", body: JSON.stringify(payload) },
+    fetcher
+  );
+}
+
+export type SharePreviewResult = {
+  // Inline base64 PNG. Avoids the S3 upload until the user actually decides
+  // to share, but means the response is ~150 KB (the full image bytes).
+  image_data_url: string;
+  score: number;
+  rank: number;
+  max_tile: number;
+};
+
+export async function previewShare(fetcher: FetchFn): Promise<SharePreviewResult> {
+  return await request<SharePreviewResult>(
+    `/api/share/preview`,
     { method: "POST" },
     fetcher
   );
 }
 
-export async function postUndo(txHash: string, fetcher: FetchFn): Promise<GameState> {
-  const data = await request<{ state: GameState }>(
-    `/api/games/undo`,
-    { method: "POST", body: JSON.stringify({ txHash }) },
-    fetcher
-  );
-  return data.state;
-}
+export type ShareResult = {
+  id: string;
+  share_url: string;
+  image_url: string;
+  score: number;
+  rank: number;
+  max_tile: number;
+};
 
-export async function submitScore(
-  payload: { username?: string; pfp_url?: string },
-  fetcher: FetchFn
-): Promise<ScoreRow> {
-  const data = await request<{ score: ScoreRow }>(
-    `/api/scores/submit`,
-    { method: "POST", body: JSON.stringify(payload) },
+export async function createShare(fetcher: FetchFn): Promise<ShareResult> {
+  return await request<ShareResult>(
+    `/api/share/create`,
+    { method: "POST" },
     fetcher
   );
-  return data.score;
 }

@@ -3,7 +3,6 @@ import { base } from "viem/chains";
 
 const TREASURY = process.env.TREASURY_ADDRESS;
 const RPC_URL = process.env.BASE_RPC_URL ?? "https://mainnet.base.org";
-const UNDO_PRICE_WEI = BigInt(process.env.UNDO_PRICE_WEI ?? "500000000000000"); // 0.0005 ETH
 const MIN_CONFIRMATIONS = BigInt(process.env.UNDO_MIN_CONFIRMATIONS ?? "1");
 
 if (!TREASURY || !isAddress(TREASURY)) {
@@ -18,20 +17,22 @@ export const client = createPublicClient({
   transport: http(RPC_URL),
 });
 
-export const undoPriceWei = UNDO_PRICE_WEI;
-
 export type VerifiedPayment = {
   amountWei: bigint;
   blockNumber: number;
 };
 
-// Verifies a tx pays the treasury with at least the base price. Fid binding
+// Verifies a tx pays the treasury with at least `minValueWei`. Fid binding
 // is done outside this function via a server-generated intent: the exact
 // `tx.value` encodes the intent id (base_price + nonce), and the server
-// looks up which fid that nonce belongs to. We can't bind fid through
-// calldata because some smart-wallet implementations (notably the embedded
-// Farcaster wallet) drop or rewrite calldata on simple transfers.
-export async function verifyUndoPayment(txHashRaw: string): Promise<VerifiedPayment> {
+// looks up which fid (and which pack) that nonce belongs to. We can't bind
+// fid through calldata because some smart-wallet implementations (notably
+// the Farcaster embedded wallet) drop or rewrite calldata on simple
+// transfers.
+export async function verifyTreasuryPayment(
+  txHashRaw: string,
+  minValueWei: bigint
+): Promise<VerifiedPayment> {
   if (!/^0x[0-9a-fA-F]{64}$/.test(txHashRaw)) {
     throw new Error("invalid tx hash format");
   }
@@ -50,7 +51,7 @@ export async function verifyUndoPayment(txHashRaw: string): Promise<VerifiedPaym
   if (!tx.to || tx.to.toLowerCase() !== treasuryLower) {
     throw new Error("wrong recipient");
   }
-  if (tx.value < UNDO_PRICE_WEI) {
+  if (tx.value < minValueWei) {
     throw new Error("insufficient value");
   }
 

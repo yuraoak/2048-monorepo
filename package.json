@@ -18,6 +18,6 @@
     "node": ">=20"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": ["esbuild", "sharp", "@resvg/resvg-js"]
   }
 }
