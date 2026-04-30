@@ -424,13 +424,19 @@ body { background: var(--bg); color: var(--fg); }
   padding: 18px 18px 18px 20px;
   border-radius: 14px;
   color: #5e544a;
-  overflow: hidden;
+  /* No overflow:hidden — the flag badge extends above the card top.
+     The busy overlay clips itself via border-radius: inherit. */
   isolation: isolate;
   transition:
     transform 160ms cubic-bezier(0.2, 0.9, 0.3, 1),
     box-shadow 160ms cubic-bezier(0.2, 0.9, 0.3, 1),
     filter 160ms ease;
 }
+
+/* Stack flagged packs above unflagged ones so floating badges aren't covered
+   by the next sibling card. */
+.packs { isolation: isolate; }
+.pack--best, .pack--popular { z-index: 1; }
 .pack:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 3px;
@@ -476,8 +482,11 @@ body { background: var(--bg); color: var(--fg); }
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.005em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
-.pack-eth .ksi { font-weight: 600; opacity: 0.88; margin-left: 2px; }
+.eth-glyph { display: inline-block; flex: 0 0 auto; }
 .pack-meta {
   font-size: 11px;
   font-weight: 600;

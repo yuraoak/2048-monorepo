@@ -613,23 +613,43 @@ function Game({ auth }: { auth: AuthState }) {
 }
 
 // Anchor pricing — best-value pack at the top so the value-driving option is
-// the first thing the eye lands on. Per-undo price + savings on larger packs
-// turns abstract dollar amounts into concrete value framing.
+// the first thing the eye lands on.
 type ShopPack = {
   id: Pack["id"];
   undos: number;
   ethDisplay: string;
   usd: number;
-  perUndo: string;
   flag?: string;
   variant: "best" | "popular" | "starter";
 };
 
 const SHOP_PACKS: ShopPack[] = [
-  { id: "large",  undos: 100, ethDisplay: "0.0043", usd: 10, perUndo: "$0.10/undo", flag: "Best value", variant: "best" },
-  { id: "medium", undos: 15,  ethDisplay: "0.0013", usd: 3,  perUndo: "$0.20/undo", flag: "Popular",    variant: "popular" },
-  { id: "small",  undos: 3,   ethDisplay: "0.0004", usd: 1,  perUndo: "",                                variant: "starter" },
+  { id: "large",  undos: 100, ethDisplay: "0.0043", usd: 10, flag: "Best value", variant: "best" },
+  { id: "medium", undos: 15,  ethDisplay: "0.0013", usd: 3,  flag: "Popular",    variant: "popular" },
+  { id: "small",  undos: 3,   ethDisplay: "0.0004", usd: 1,                       variant: "starter" },
 ];
+
+// Canonical Ethereum diamond logo. Renders at currentColor so it inherits
+// the surrounding text colour on each pack variant.
+function EthGlyph() {
+  return (
+    <svg
+      className="eth-glyph"
+      viewBox="0 0 256 417"
+      width="0.78em"
+      height="0.78em"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path fill="currentColor" opacity=".55" d="M127.961 0l-2.795 9.5v275.668l2.795 2.79 127.962-75.638z" />
+      <path fill="currentColor" d="M127.962 0L0 212.32l127.962 75.639V154.158z" />
+      <path fill="currentColor" opacity=".55" d="M127.961 312.187l-1.575 1.92v98.199l1.575 4.6L256 236.587z" />
+      <path fill="currentColor" d="M127.962 416.905v-104.72L0 236.585z" />
+      <path fill="currentColor" opacity=".22" d="M127.961 287.958l127.96-75.637-127.96-58.162z" />
+      <path fill="currentColor" opacity=".55" d="M0 212.32l127.96 75.638v-133.8z" />
+    </svg>
+  );
+}
 
 type ShopModalProps = {
   credits: number;
@@ -697,13 +717,10 @@ function ShopModal({ credits, onBuy, onClose }: ShopModalProps) {
               <span className="pack-gap" />
               <span className="pack-price">
                 <span className="pack-eth">
+                  <EthGlyph />
                   {p.ethDisplay}
-                  <span className="ksi"> Ξ</span>
                 </span>
-                <span className="pack-meta">
-                  ≈ ${p.usd}
-                  {p.perUndo && ` · ${p.perUndo}`}
-                </span>
+                <span className="pack-meta">≈ ${p.usd}</span>
               </span>
               {busy === p.id && <span className="pack-overlay">Confirm in wallet…</span>}
             </button>
