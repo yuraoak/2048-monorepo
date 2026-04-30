@@ -787,8 +787,8 @@ function GameOverModal({
       const scoreText = score.toLocaleString("en-US");
       const rankText = rank ? ` (#${rank})` : "";
       const text = newBest
-        ? `new 2048 PB — ${scoreText}${rankText}. think you can beat that?`
-        : `${scoreText} on 2048${rankText}. who's coming for me`;
+        ? `New personal best on 2048 — ${scoreText}${rankText}. Think you can beat that?`
+        : `${scoreText} on 2048${rankText}. Who's coming for me?`;
       await sdk.actions.composeCast({
         text,
         embeds: [created.share_url],
