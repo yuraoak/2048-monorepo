@@ -619,14 +619,13 @@ type ShopPack = {
   undos: number;
   ethDisplay: string;
   usd: number;
-  flag?: string;
   variant: "best" | "popular" | "starter";
 };
 
 const SHOP_PACKS: ShopPack[] = [
-  { id: "large",  undos: 100, ethDisplay: "0.0043", usd: 10, flag: "Best value", variant: "best" },
-  { id: "medium", undos: 15,  ethDisplay: "0.0013", usd: 3,  flag: "Popular",    variant: "popular" },
-  { id: "small",  undos: 3,   ethDisplay: "0.0004", usd: 1,                       variant: "starter" },
+  { id: "large",  undos: 100, ethDisplay: "0.0043", usd: 10, variant: "best" },
+  { id: "medium", undos: 15,  ethDisplay: "0.0013", usd: 3,  variant: "popular" },
+  { id: "small",  undos: 3,   ethDisplay: "0.0004", usd: 1,  variant: "starter" },
 ];
 
 // Canonical Ethereum diamond logo. Renders at currentColor so it inherits
@@ -709,7 +708,6 @@ function ShopModal({ credits, onBuy, onClose }: ShopModalProps) {
               onClick={() => void click(p.id)}
               disabled={busy !== null}
             >
-              {p.flag && <span className="pack-flag">{p.flag}</span>}
               <span className="pack-amount">
                 <span className="pack-num">{p.undos}</span>
                 <span className="pack-unit">undos</span>

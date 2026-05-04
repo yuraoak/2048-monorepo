@@ -421,11 +421,10 @@ body { background: var(--bg); color: var(--fg); }
   grid-template-columns: minmax(72px, auto) 1fr auto;
   align-items: center;
   gap: 14px;
-  padding: 18px 18px 18px 20px;
+  padding: 20px 20px;
   border-radius: 14px;
   color: #5e544a;
-  /* No overflow:hidden — the flag badge extends above the card top.
-     The busy overlay clips itself via border-radius: inherit. */
+  /* The busy overlay clips itself via border-radius: inherit. */
   isolation: isolate;
   transition:
     transform 160ms cubic-bezier(0.2, 0.9, 0.3, 1),
@@ -433,10 +432,6 @@ body { background: var(--bg); color: var(--fg); }
     filter 160ms ease;
 }
 
-/* Stack flagged packs above unflagged ones so floating badges aren't covered
-   by the next sibling card. */
-.packs { isolation: isolate; }
-.pack--best, .pack--popular { z-index: 1; }
 .pack:focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 3px;
@@ -452,18 +447,18 @@ body { background: var(--bg); color: var(--fg); }
   min-width: 0;
 }
 .pack-num {
-  font-size: 44px;
-  font-weight: 900;
-  letter-spacing: -0.045em;
+  font-size: 52px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
   font-variant-numeric: tabular-nums;
   line-height: 0.9;
 }
 .pack-unit {
-  margin-top: 6px;
+  margin-top: 8px;
   font-size: 10px;
   font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.18em;
   opacity: 0.62;
 }
 
@@ -478,7 +473,7 @@ body { background: var(--bg); color: var(--fg); }
   flex: 0 0 auto;
 }
 .pack-eth {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.005em;
@@ -489,25 +484,10 @@ body { background: var(--bg); color: var(--fg); }
 .eth-glyph { display: inline-block; flex: 0 0 auto; }
 .pack-meta {
   font-size: 11px;
-  font-weight: 600;
-  opacity: 0.78;
+  font-weight: 700;
+  opacity: 0.72;
   font-variant-numeric: tabular-nums;
-}
-
-.pack-flag {
-  position: absolute;
-  top: 0;
-  right: 18px;
-  transform: translateY(-50%);
-  font-size: 9px;
-  font-weight: 900;
-  text-transform: uppercase;
-  letter-spacing: 0.2em;
-  padding: 5px 9px 4px;
-  border-radius: 999px;
-  background: #5e544a;
-  color: #fff;
-  z-index: 2;
+  letter-spacing: 0.01em;
 }
 
 /* Variant — starter (cream tile) */
@@ -539,8 +519,6 @@ body { background: var(--bg); color: var(--fg); }
     inset 0 -1px 0 rgba(0, 0, 0, 0.15),
     0 8px 20px -10px rgba(207, 94, 63, 0.55);
 }
-.pack--popular .pack-num { font-size: 50px; }
-.pack--popular .pack-flag { background: #fff5ee; color: #cf5e3f; }
 .pack--popular:hover:not(:disabled) {
   transform: translateY(-2px);
   box-shadow:
@@ -555,15 +533,11 @@ body { background: var(--bg); color: var(--fg); }
     radial-gradient(ellipse at 22% 8%, rgba(255, 255, 255, 0.45), transparent 55%),
     linear-gradient(140deg, #edc22e 0%, #d4ad19 100%);
   color: #5e544a;
-  padding: 22px 20px;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.5),
     inset 0 -1px 0 rgba(120, 90, 0, 0.2),
     0 14px 36px -10px rgba(212, 173, 25, 0.6);
 }
-.pack--best .pack-num { font-size: 60px; }
-.pack--best .pack-eth { font-size: 19px; }
-.pack--best .pack-flag { background: #5e544a; color: #edc22e; }
 .pack--best:hover:not(:disabled) {
   transform: translateY(-2px);
   filter: brightness(1.04);
@@ -615,11 +589,8 @@ body { background: var(--bg); color: var(--fg); }
 @media (max-width: 380px) {
   .shop { padding: 22px 16px 16px; }
   .pack { padding: 16px 14px; gap: 10px; }
-  .pack-num { font-size: 38px; }
-  .pack--popular .pack-num { font-size: 44px; }
-  .pack--best .pack-num { font-size: 52px; }
+  .pack-num { font-size: 44px; }
   .pack-eth { font-size: 15px; }
-  .pack--best .pack-eth { font-size: 17px; }
   .shop-title { font-size: 22px; }
 }
 
