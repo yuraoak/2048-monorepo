@@ -558,7 +558,7 @@ function Game({ auth }: { auth: AuthState }) {
           {undoLabel}
         </button>
         <button className="btn" onClick={startFresh}>
-          New game
+          New Game
         </button>
       </div>
       {undoError && <div className="muted error">Undo failed: {undoError}</div>}
