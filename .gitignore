@@ -7,5 +7,4 @@ dist
 *.tsbuildinfo
 .turbo
 .cache
-.railway
 apps/reconciler/reconciler

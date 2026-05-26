@@ -5,7 +5,7 @@ const client = createClient();
 const domain = process.env.MINIAPP_DOMAIN;
 if (!domain) {
   throw new Error(
-    "MINIAPP_DOMAIN is required (host where the mini app frontend is served, e.g. 2048-web.up.railway.app)"
+    "MINIAPP_DOMAIN is required (host where the mini app frontend is served, e.g. 2048.example.com)"
   );
 }
 

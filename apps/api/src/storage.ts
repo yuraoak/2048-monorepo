@@ -1,12 +1,11 @@
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 
-// S3-compatible blob storage. On Railway this is the managed Object Storage
-// service (S3-compatible endpoint). The same code works against AWS S3 or
-// any other compatible provider that uses virtual-hosted-style URLs.
+// S3-compatible blob storage. Works against AWS S3 or any compatible
+// provider that uses virtual-hosted-style URLs.
 //
 // We assemble the public URL ourselves as `https://<bucket>.<host>/<key>`
 // rather than taking a separate public-base-url env var: that's exactly
-// the virtual-hosted layout Railway/R2/AWS use, so we'd just be asking
+// the virtual-hosted layout S3/R2/etc. use, so we'd just be asking
 // users to type the same thing twice.
 
 const endpoint = process.env.S3_ENDPOINT;
@@ -24,14 +23,13 @@ function client(): S3Client {
   }
   cached = new S3Client({
     endpoint,
-    // Region is meaningless for non-AWS S3-compatible providers (Railway,
-    // R2, Minio); they accept anything. Hardcode "auto" so users don't
-    // have to set an env var that does nothing.
+    // Region is meaningless for non-AWS S3-compatible providers (R2,
+    // Minio, Tigris); they accept anything. Hardcode "auto" so users
+    // don't have to set an env var that does nothing.
     region: "auto",
     credentials: { accessKeyId, secretAccessKey },
     // Virtual-hosted style — bucket goes into the host part of the URL
-    // (e.g. https://my-bucket.t3.storageapi.dev/key.png). Required by
-    // Railway's bucket UI ("Use virtual-hosted-style URLs.") and matches
+    // (e.g. https://my-bucket.t3.storageapi.dev/key.png). Matches
     // AWS/R2 default behavior.
     forcePathStyle: false,
   });
@@ -70,11 +68,11 @@ export function isStorageConfigured(): boolean {
   return Boolean(endpoint && accessKeyId && secretAccessKey && bucket);
 }
 
-// Fetches an object using the same credentials we uploaded with. Tigris
-// (Railway's storage backend) doesn't expose any public-read toggle and
-// returns 501 NotImplemented on PutBucketPolicy, so direct anonymous GETs
-// to the bucket URL aren't possible. We stream objects through the API to
-// keep share images publicly scrapable by Farcaster.
+// Fetches an object using the same credentials we uploaded with. Some
+// S3-compatible backends (e.g. Tigris) don't expose any public-read
+// toggle and return 501 NotImplemented on PutBucketPolicy, so direct
+// anonymous GETs to the bucket URL aren't possible. We stream objects
+// through the API to keep share images publicly scrapable by Farcaster.
 export async function getPublicObject(
   key: string
 ): Promise<{ body: Uint8Array; contentType: string } | null> {

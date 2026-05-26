@@ -500,7 +500,7 @@ app.post("/api/scores/submit", farcasterAuth, async (c) => {
 //      persisted — if the user closes the modal we don't litter S3 with
 //      images that nobody will ever see.
 //   2. User clicks "Share to Farcaster" → client calls POST /api/share/create.
-//      Server re-renders, uploads the PNG to S3 (Railway Object Storage),
+//      Server re-renders, uploads the PNG to S3-compatible storage,
 //      saves a `shares` row keyed by a short opaque id, and returns the
 //      public share URL.
 //   3. Client calls sdk.actions.composeCast({ embeds: [share_url] }). The
@@ -627,10 +627,10 @@ app.post("/api/share/create", farcasterAuth, async (c) => {
   const objectKey = `shares/${id}.png`;
   await uploadPublicObject(objectKey, png, "image/png");
 
-  // Tigris (Railway's storage backend) returns 501 on PutBucketPolicy and
-  // exposes no public-read toggle in the Railway UI, so direct bucket URLs
-  // are 403 to anonymous clients. We hand out an api-hosted URL and stream
-  // the PNG through /share-image/:id with credentials.
+  // Some S3-compatible backends (e.g. Tigris) return 501 on
+  // PutBucketPolicy and expose no public-read toggle, so direct bucket
+  // URLs are 403 to anonymous clients. We hand out an api-hosted URL and
+  // stream the PNG through /share-image/:id with credentials.
   const imageUrl = `${apiPublicUrl}/share-image/${id}`;
 
   await sql`
