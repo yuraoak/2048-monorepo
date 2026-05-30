@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -53,6 +54,25 @@ func main() {
 		"max_blocks_per_tick", cfg.MaxBlocksPerTick,
 		"min_confirmations", cfg.MinConfirmations,
 	)
+
+	// Minimal HTTP listener so PaaS healthchecks pass. The worker has no real
+	// HTTP surface, but Lizard's deploy gate waits for $PORT to bind.
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+		mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+		if err := http.ListenAndServe(":"+port, mux); err != nil {
+			slog.Error("healthz listener", "err", err)
+		}
+	}()
 
 	runTick(ctx, r)
 
