@@ -28,10 +28,11 @@ function client(): S3Client {
     // don't have to set an env var that does nothing.
     region: "auto",
     credentials: { accessKeyId, secretAccessKey },
-    // Virtual-hosted style — bucket goes into the host part of the URL
-    // (e.g. https://my-bucket.t3.storageapi.dev/key.png). Matches
-    // AWS/R2 default behavior.
-    forcePathStyle: false,
+    // Virtual-hosted style by default (bucket in the host part, e.g.
+    // https://my-bucket.t3.storageapi.dev/key.png) — matches AWS/R2.
+    // Some providers (e.g. Lizard's managed S3, MinIO) only support
+    // path-style; set S3_FORCE_PATH_STYLE=true for those.
+    forcePathStyle: process.env.S3_FORCE_PATH_STYLE === "true",
   });
   return cached;
 }
