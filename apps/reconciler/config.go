@@ -25,9 +25,9 @@ func LoadConfig() (Config, error) {
 		TreasuryAddress:  os.Getenv("TREASURY_ADDRESS"),
 		MinConfirmations: parseUint("UNDO_MIN_CONFIRMATIONS", 1),
 		PollInterval:     parseDuration("RECONCILER_INTERVAL", 60*time.Second),
-		MaxBlocksPerTick: parseUint("RECONCILER_MAX_BLOCKS_PER_TICK", 2000),
+		MaxBlocksPerTick: parseUint("RECONCILER_MAX_BLOCKS_PER_TICK", 1000),
 		InitialLookback:  parseUint("RECONCILER_INITIAL_LOOKBACK", 50_000),
-		ScanConcurrency:  parseUint("RECONCILER_SCAN_CONCURRENCY", 16),
+		ScanConcurrency:  parseUint("RECONCILER_SCAN_CONCURRENCY", 6),
 	}
 	if cfg.DatabaseURL == "" {
 		return cfg, errors.New("DATABASE_URL required")
