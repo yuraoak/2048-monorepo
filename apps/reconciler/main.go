@@ -3,11 +3,22 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 )
+
+// redactRPC strips the path/query from an RPC URL so API keys (e.g. Alchemy's
+// /v2/<key>) never land in logs. Returns scheme://host.
+func redactRPC(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "<rpc>"
+	}
+	return u.Scheme + "://" + u.Host
+}
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
@@ -48,7 +59,7 @@ func main() {
 	}
 
 	slog.Info("reconciler started",
-		"rpc", cfg.BaseRPCURL,
+		"rpc", redactRPC(cfg.BaseRPCURL),
 		"treasury", cfg.TreasuryAddress,
 		"interval", cfg.PollInterval.String(),
 		"max_blocks_per_tick", cfg.MaxBlocksPerTick,
