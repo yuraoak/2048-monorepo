@@ -41,6 +41,16 @@ export class PaymentPendingError extends Error {
   }
 }
 
+// Heuristic for retryable RPC failures (rate limit, 5xx, timeouts, network).
+// Our own terminal checks throw plain Error("tx reverted" / "wrong recipient"
+// / "insufficient value") which intentionally don't match here.
+function isTransientRpcError(err: unknown): boolean {
+  const s = (err instanceof Error ? `${err.name} ${err.message}` : String(err));
+  return /rate limit|429|\b50[234]\b|timeout|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|network|fetch failed|HttpRequestError|TimeoutError/i.test(
+    s
+  );
+}
+
 // Verifies a tx pays the treasury with at least `minValueWei`. Fid binding
 // is done outside this function via a server-generated intent: the exact
 // `tx.value` encodes the intent id (base_price + nonce), and the server
@@ -73,6 +83,12 @@ export async function verifyTreasuryPayment(
       err instanceof TransactionReceiptNotFoundError
     ) {
       throw new PaymentPendingError("tx not yet mined");
+    }
+    // Rate limit / 5xx / timeout / network blip on the RPC: not the payment's
+    // fault. Treat as retryable so a transient RPC error doesn't reject a real
+    // payment — the client polls and the reconciler is the long-tail net.
+    if (isTransientRpcError(err)) {
+      throw new PaymentPendingError("rpc temporarily unavailable");
     }
     throw err;
   }
