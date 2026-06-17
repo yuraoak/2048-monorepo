@@ -1,4 +1,11 @@
-import { createPublicClient, http, isAddress, type Hex } from "viem";
+import {
+  createPublicClient,
+  http,
+  isAddress,
+  TransactionNotFoundError,
+  TransactionReceiptNotFoundError,
+  type Hex,
+} from "viem";
 import { base } from "viem/chains";
 
 const TREASURY = process.env.TREASURY_ADDRESS;
@@ -22,6 +29,18 @@ export type VerifiedPayment = {
   blockNumber: number;
 };
 
+// Thrown when the tx exists but isn't yet usable — not propagated to the
+// node, not mined, or mined but short of MIN_CONFIRMATIONS. The caller should
+// treat this as retryable (the client polls /buy until it clears) rather than
+// a hard rejection. Distinct from terminal failures (reverted, wrong
+// recipient, insufficient value) which must never be retried.
+export class PaymentPendingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PaymentPendingError";
+  }
+}
+
 // Verifies a tx pays the treasury with at least `minValueWei`. Fid binding
 // is done outside this function via a server-generated intent: the exact
 // `tx.value` encodes the intent id (base_price + nonce), and the server
@@ -38,15 +57,29 @@ export async function verifyTreasuryPayment(
   }
   const txHash = txHashRaw.toLowerCase() as Hex;
 
-  const [tx, receipt, head] = await Promise.all([
-    client.getTransaction({ hash: txHash }),
-    client.getTransactionReceipt({ hash: txHash }),
-    client.getBlockNumber(),
-  ]);
+  let tx, receipt, head;
+  try {
+    [tx, receipt, head] = await Promise.all([
+      client.getTransaction({ hash: txHash }),
+      client.getTransactionReceipt({ hash: txHash }),
+      client.getBlockNumber(),
+    ]);
+  } catch (err) {
+    // The wallet returns the hash on submission, so /buy is typically called
+    // before the tx is mined (or before this RPC node has seen it). Surface
+    // that as retryable instead of a hard failure.
+    if (
+      err instanceof TransactionNotFoundError ||
+      err instanceof TransactionReceiptNotFoundError
+    ) {
+      throw new PaymentPendingError("tx not yet mined");
+    }
+    throw err;
+  }
 
   if (receipt.status !== "success") throw new Error("tx reverted");
   if (head - receipt.blockNumber < MIN_CONFIRMATIONS) {
-    throw new Error("not enough confirmations");
+    throw new PaymentPendingError("not enough confirmations");
   }
   if (!tx.to || tx.to.toLowerCase() !== treasuryLower) {
     throw new Error("wrong recipient");

@@ -7,7 +7,7 @@ import { sql } from "./db.js";
 import { farcasterAuth } from "./auth.js";
 import { cacheGet, cacheSet, cacheInvalidatePattern, rateLimit, redis } from "./cache.js";
 import { replay } from "./replay.js";
-import { treasuryAddress, verifyTreasuryPayment } from "./onchain.js";
+import { treasuryAddress, verifyTreasuryPayment, PaymentPendingError } from "./onchain.js";
 import { isPackId, UNDO_PACKS, type PackId } from "./shop.js";
 import {
   casAppend,
@@ -326,6 +326,11 @@ app.post("/api/shop/packs/buy", farcasterAuth, async (c) => {
   try {
     payment = await verifyTreasuryPayment(txHash, pack.priceWei);
   } catch (err) {
+    // Tx submitted but not yet mined/confirmed — retryable. The client polls
+    // /buy until it clears; the reconciler is the long-tail safety net.
+    if (err instanceof PaymentPendingError) {
+      return c.json({ status: "pending", detail: String(err) }, 202);
+    }
     return c.json({ error: "payment verification failed", detail: String(err) }, 400);
   }
 

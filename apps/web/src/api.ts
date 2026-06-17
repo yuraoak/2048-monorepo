@@ -139,18 +139,30 @@ export async function fetchPackIntent(
   );
 }
 
-export type BuyPackResult = { undo_credits: number; undos_credited: number };
+export type BuyPackResult =
+  | { status: "credited"; undo_credits: number; undos_credited: number }
+  | { status: "pending" };
 
+// The wallet returns a tx hash on submission, so the payment is usually not
+// mined yet when /buy is first called. The server answers 202 until the tx
+// has enough confirmations; callers should poll on "pending".
 export async function buyPack(
   txHash: string,
   pack: Pack["id"],
   fetcher: FetchFn
 ): Promise<BuyPackResult> {
-  return await request<BuyPackResult>(
-    `/api/shop/packs/buy`,
-    { method: "POST", body: JSON.stringify({ txHash, pack }) },
-    fetcher
-  );
+  const res = await fetcher(`${API_URL}/api/shop/packs/buy`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ txHash, pack }),
+  });
+  if (res.status === 202) return { status: "pending" };
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`${res.status} ${res.statusText}${text ? ` — ${text}` : ""}`);
+  }
+  const data = (await res.json()) as { undo_credits: number; undos_credited: number };
+  return { status: "credited", ...data };
 }
 
 export type UndoResult =

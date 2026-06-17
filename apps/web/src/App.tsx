@@ -431,7 +431,7 @@ function Game({ auth }: { auth: AuthState }) {
       setUndoCredits(res.undo_credits);
     } catch (err: unknown) {
       const e = err as { message?: string };
-      setUndoError(e.message ?? "undo failed");
+      setUndoError(`Undo failed: ${e.message ?? "unknown error"}`);
     } finally {
       undoActiveRef.current = false;
       setUndoStatus("idle");
@@ -446,13 +446,27 @@ function Game({ auth }: { auth: AuthState }) {
           treasury: intent.treasury,
           amountWei: intent.amount_wei,
         });
-        const res = await buyPack(txHash, packId, auth.fetcher);
+        // payTreasury resolves on submission, not on mining, so /buy returns
+        // "pending" until the tx confirms. Poll until it's credited (Base
+        // blocks land in seconds) while staying well inside the intent TTL.
+        const deadline = Date.now() + 120_000;
+        let res = await buyPack(txHash, packId, auth.fetcher);
+        while (res.status === "pending" && Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 3000));
+          res = await buyPack(txHash, packId, auth.fetcher);
+        }
+        if (res.status !== "credited") {
+          // Still unconfirmed after the poll window. The payment is on-chain;
+          // the reconciler credits it shortly even if we stop waiting here.
+          setUndoError("Payment sent — credits will appear once it confirms.");
+          return;
+        }
         setUndoCredits(res.undo_credits);
         setShowShop(false);
       } catch (err: unknown) {
         const e = err as { message?: string; code?: number };
         if (e.code === 4001) return; // user rejected
-        setUndoError(e.message ?? "purchase failed");
+        setUndoError(`Purchase failed: ${e.message ?? "unknown error"}`);
       }
     },
     [auth.fetcher]
@@ -561,7 +575,7 @@ function Game({ auth }: { auth: AuthState }) {
           New Game
         </button>
       </div>
-      {undoError && <div className="muted error">Undo failed: {undoError}</div>}
+      {undoError && <div className="muted error">{undoError}</div>}
 
       <div className="board" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
         {Array.from({ length: 16 }).map((_, i) => (
