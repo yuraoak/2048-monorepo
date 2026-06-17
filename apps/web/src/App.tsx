@@ -2,7 +2,6 @@ import { type CSSProperties, memo, useCallback, useEffect, useMemo, useRef, useS
 import sdk from "@farcaster/miniapp-sdk";
 import {
   canMove,
-  maxTileValue,
   move,
   mulberry32,
   newGameTiles,
@@ -515,7 +514,6 @@ function Game({ auth }: { auth: AuthState }) {
 
   const sortedTiles = useMemo(() => [...tiles].sort((a, b) => a.id - b.id), [tiles]);
   const displayName = auth.user.username ?? `fid:${auth.user.fid}`;
-  const maxTile = maxTileValue(tiles);
 
   const noCredits = undoCredits <= 0;
   // When the user has no credits the button is always active (it opens the
@@ -596,7 +594,7 @@ function Game({ auth }: { auth: AuthState }) {
 
       <div className={`status${over ? " lose" : ""}`}>
         <span className="status-info">
-          {over ? "No moves left." : `Moves: ${moves} · Max tile: ${maxTile}`}
+          {over ? "No moves left." : `Moves: ${moves}`}
         </span>
         <span className="status-hint">Arrow keys or swipe to move</span>
       </div>
