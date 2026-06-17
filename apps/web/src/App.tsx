@@ -595,7 +595,10 @@ function Game({ auth }: { auth: AuthState }) {
       </div>
 
       <div className={`status${over ? " lose" : ""}`}>
-        {over ? "No moves left." : `Moves: ${moves} · Max tile: ${maxTile}`}
+        <span className="status-info">
+          {over ? "No moves left." : `Moves: ${moves} · Max tile: ${maxTile}`}
+        </span>
+        <span className="status-hint">Arrow keys or swipe to move</span>
       </div>
 
       {showLeaderboard && (
