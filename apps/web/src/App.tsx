@@ -497,19 +497,28 @@ function Game({ auth }: { auth: AuthState }) {
   }, [apply]);
 
   const touchStart = useRef<{ x: number; y: number } | null>(null);
+  // Whether this gesture has already fired a move. Firing mid-drag (on
+  // touchmove, as soon as the finger crosses the threshold) rather than on
+  // touchend makes the swipe feel as instant as a key press — there's no wait
+  // for the finger to lift. One move per gesture; the flag blocks re-fires.
+  const swipeFired = useRef(false);
   const onTouchStart = (e: React.TouchEvent) => {
     const t = e.touches[0];
     touchStart.current = { x: t.clientX, y: t.clientY };
+    swipeFired.current = false;
   };
-  const onTouchEnd = (e: React.TouchEvent) => {
-    if (!touchStart.current) return;
-    const t = e.changedTouches[0];
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (!touchStart.current || swipeFired.current) return;
+    const t = e.touches[0];
     const dx = t.clientX - touchStart.current.x;
     const dy = t.clientY - touchStart.current.y;
-    touchStart.current = null;
     if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return;
+    swipeFired.current = true;
     if (Math.abs(dx) > Math.abs(dy)) apply(dx > 0 ? "right" : "left");
     else apply(dy > 0 ? "down" : "up");
+  };
+  const onTouchEnd = () => {
+    touchStart.current = null;
   };
 
   const sortedTiles = useMemo(() => [...tiles].sort((a, b) => a.id - b.id), [tiles]);
@@ -575,7 +584,12 @@ function Game({ auth }: { auth: AuthState }) {
       </div>
       {undoError && <div className="muted error">{undoError}</div>}
 
-      <div className="board" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
+      <div
+        className="board"
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+      >
         {Array.from({ length: 16 }).map((_, i) => (
           <div className="cell" key={i} />
         ))}
