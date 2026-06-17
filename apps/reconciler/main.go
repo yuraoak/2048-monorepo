@@ -44,6 +44,7 @@ func main() {
 		minConfirmations: cfg.MinConfirmations,
 		maxBlocksPerTick: cfg.MaxBlocksPerTick,
 		initialLookback:  cfg.InitialLookback,
+		scanConcurrency:  cfg.ScanConcurrency,
 	}
 
 	slog.Info("reconciler started",
@@ -51,6 +52,7 @@ func main() {
 		"treasury", cfg.TreasuryAddress,
 		"interval", cfg.PollInterval.String(),
 		"max_blocks_per_tick", cfg.MaxBlocksPerTick,
+		"scan_concurrency", cfg.ScanConcurrency,
 		"min_confirmations", cfg.MinConfirmations,
 	)
 

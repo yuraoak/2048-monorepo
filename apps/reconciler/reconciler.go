@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"sync"
 )
 
 type Reconciler struct {
@@ -12,6 +13,7 @@ type Reconciler struct {
 	minConfirmations uint64
 	maxBlocksPerTick uint64
 	initialLookback  uint64
+	scanConcurrency  uint64
 }
 
 func (r *Reconciler) Tick(ctx context.Context) error {
@@ -52,29 +54,65 @@ func (r *Reconciler) Tick(ctx context.Context) error {
 		to = from + r.maxBlocksPerTick - 1
 	}
 
-	slog.Info("scanning blocks", "from", from, "to", to, "head", head)
+	slog.Info("scanning blocks", "from", from, "to", to, "head", head, "lag", safeHead-to)
 
-	for block := from; block <= to; block++ {
-		if err := r.scanBlock(ctx, block); err != nil {
-			// Don't advance the cursor past a block we couldn't fully
-			// process. Better to retry on the next tick than to silently
-			// skip a block on a transient RPC error.
-			return err
-		}
-		if err := r.store.SetCursor(ctx, block); err != nil {
-			return err
-		}
-	}
-	return nil
+	return r.scanRange(ctx, from, to)
 }
 
-func (r *Reconciler) scanBlock(ctx context.Context, block uint64) error {
-	txs, err := r.chain.ScanBlock(ctx, block)
-	if err != nil {
-		return err
+type blockScan struct {
+	block uint64
+	txs   []TreasuryTx
+	err   error
+}
+
+// scanRange fetches every block in [from, to] concurrently — block fetches
+// are the bottleneck (one eth_getBlockByNumber each), and the public RPC has
+// plenty of headroom for parallel reads. Results are then processed strictly
+// in block order so the cursor only ever advances over a contiguous run of
+// fully-processed blocks: we stop at the first block we couldn't fetch and
+// retry from there next tick rather than skipping it.
+func (r *Reconciler) scanRange(ctx context.Context, from, to uint64) error {
+	n := to - from + 1
+	results := make([]blockScan, n)
+
+	conc := r.scanConcurrency
+	if conc < 1 {
+		conc = 1
 	}
-	for _, tx := range txs {
-		if err := r.processTx(ctx, tx); err != nil {
+	if conc > n {
+		conc = n
+	}
+
+	sem := make(chan struct{}, conc)
+	var wg sync.WaitGroup
+	for i := uint64(0); i < n; i++ {
+		block := from + i
+		idx := i
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			txs, err := r.chain.ScanBlock(ctx, block)
+			results[idx] = blockScan{block: block, txs: txs, err: err}
+		}()
+	}
+	wg.Wait()
+
+	for i := range results {
+		res := results[i]
+		if res.err != nil {
+			// Stop without advancing past the gap. Earlier blocks in this
+			// range were already processed and their cursor writes committed,
+			// so next tick resumes exactly at this block.
+			return res.err
+		}
+		for _, tx := range res.txs {
+			if err := r.processTx(ctx, tx); err != nil {
+				return err
+			}
+		}
+		if err := r.store.SetCursor(ctx, res.block); err != nil {
 			return err
 		}
 	}
